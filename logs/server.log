@@ -1,25 +1,21 @@
 INFO:     Will watch for changes in these directories: ['/home/workspace']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [689] using StatReload
-INFO:     Started server process [691]
+INFO:     Started reloader process [762] using StatReload
+INFO:     Started server process [764]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     172.20.0.1:59450 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59462 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59488 - "HEAD / HTTP/1.1" 405 Method Not Allowed
-INFO:     172.20.0.1:59482 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59482 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59482 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59492 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59504 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59504 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:45438 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:59504 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:45444 - "GET /purchase-orders HTTP/1.1" 200 OK
-INFO:     172.20.0.1:45444 - "OPTIONS /grns HTTP/1.1" 200 OK
-INFO:     172.20.0.1:45444 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36976 - "OPTIONS /grns HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36980 - "GET /purchase-orders HTTP/1.1" 200 OK
-INFO:     172.20.0.1:45444 - "GET /grns HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36990 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36980 - "GET /grns HTTP/1.1" 200 OK
+INFO:     172.20.0.1:53056 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     172.20.0.1:53038 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:53046 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:53038 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:53046 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44924 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44932 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44924 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44932 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44948 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44948 - "OPTIONS /material-requests HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44948 - "OPTIONS /material-requests HTTP/1.1" 200 OK
+INFO:     172.20.0.1:55738 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:55746 - "GET /material-requests HTTP/1.1" 200 OK
+INFO:     172.20.0.1:55738 - "GET /material-requests HTTP/1.1" 200 OK
