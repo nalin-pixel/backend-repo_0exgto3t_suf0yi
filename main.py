@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,8 +15,8 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Date,
-    Enum,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 from sqlalchemy.sql import func
@@ -84,6 +84,30 @@ class PurchaseRequisition(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     items = relationship("PurchaseRequisitionItem", back_populates="pr", cascade="all, delete-orphan")
+    extra = relationship("PRExtra", back_populates="pr", uselist=False, cascade="all, delete-orphan")
+
+
+class PRExtra(Base):
+    __tablename__ = "pr_extra"
+    id = Column(Integer, primary_key=True)
+    pr_id = Column(Integer, ForeignKey("purchase_requisitions.id", ondelete="CASCADE"), unique=True, nullable=False)
+    # Business keys and carry-forward fields
+    customer_name = Column(String(255), nullable=False)
+    customer_ref_no = Column(String(128), nullable=False)
+    supplier_name = Column(String(255))
+    supplier_address = Column(Text)
+    tax_code = Column(String(32))
+    tax_percent = Column(Float, default=0)
+    # Approvals
+    approval_status = Column(String(32), default="PENDING")  # PENDING, APPROVED, REJECTED
+    approval_level = Column(Integer, default=0)
+    approval_flow = Column(Text)  # JSON string with stages
+
+    pr = relationship("PurchaseRequisition", back_populates="extra")
+
+    __table_args__ = (
+        UniqueConstraint("customer_name", "customer_ref_no", name="uq_customer_ref"),
+    )
 
 
 class PurchaseRequisitionItem(Base):
@@ -97,6 +121,19 @@ class PurchaseRequisitionItem(Base):
 
     pr = relationship("PurchaseRequisition", back_populates="items")
     item = relationship("Item", back_populates="pr_items")
+    extra = relationship("PRItemExtra", back_populates="pr_item", uselist=False, cascade="all, delete-orphan")
+
+
+class PRItemExtra(Base):
+    __tablename__ = "pr_item_extra"
+    id = Column(Integer, primary_key=True)
+    pr_item_id = Column(Integer, ForeignKey("purchase_requisition_items.id", ondelete="CASCADE"), unique=True, nullable=False)
+    qty_bags = Column(Float, default=0)
+    qty_kgs = Column(Float, default=0)
+    unit_price = Column(Float, default=0)
+    line_tax_percent = Column(Float)
+
+    pr_item = relationship("PurchaseRequisitionItem", back_populates="extra")
 
 
 class PurchaseOrder(Base):
@@ -201,6 +238,18 @@ class TaxRate(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ApprovalConfig(Base):
+    __tablename__ = "approval_config"
+    id = Column(Integer, primary_key=True)
+    doc_type = Column(String(32), nullable=False)  # e.g., PR
+    flow_json = Column(Text, nullable=False)  # JSON string of stages
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("doc_type", name="uq_doc_type"),
+    )
+
+
 # -----------------------------
 # Pydantic Schemas
 # -----------------------------
@@ -234,19 +283,35 @@ class ItemOut(ItemIn):
 
 class PRItemIn(BaseModel):
     item_id: int
-    qty: float
-    target_price: float = 0
+    # New detailed quantities
+    qty_bags: Optional[float] = None
+    qty_kgs: Optional[float] = None
+    unit_price: Optional[float] = 0
     notes: Optional[str] = None
 
 
 class PRCreate(BaseModel):
-    pr_number: str
+    pr_number: str = Field(..., description="Reference number")
     requested_by: Optional[str] = None
     department: Optional[str] = None
     requested_date: Optional[date] = None
     status: str = "OPEN"
     notes: Optional[str] = None
+    # Business keys and header
+    customer_name: str
+    customer_ref_no: str
+    supplier_name: Optional[str] = None
+    supplier_address: Optional[str] = None
+    tax_code: Optional[str] = None
     items: List[PRItemIn]
+
+
+class PROutItem(BaseModel):
+    item_id: int
+    qty_bags: Optional[float] = None
+    qty_kgs: Optional[float] = None
+    unit_price: Optional[float] = 0
+    notes: Optional[str] = None
 
 
 class PROut(BaseModel):
@@ -257,7 +322,15 @@ class PROut(BaseModel):
     requested_date: date
     status: str
     notes: Optional[str]
-    items: List[PRItemIn]
+    customer_name: str
+    customer_ref_no: str
+    supplier_name: Optional[str]
+    supplier_address: Optional[str]
+    tax_code: Optional[str]
+    tax_percent: Optional[float]
+    approval_status: Optional[str]
+    approval_level: Optional[int]
+    items: List[PROutItem]
 
     class Config:
         from_attributes = True
@@ -334,6 +407,17 @@ class TaxRateOut(TaxRateIn):
     id: int
     class Config:
         from_attributes = True
+
+
+class ApprovalFlowIn(BaseModel):
+    doc_type: str = Field("PR", description="Document type")
+    stages: List[Dict[str, Any]] = Field(..., description="List of stages in order, e.g., [{level:1,name:'Manager'}]")
+
+
+class ApproveAction(BaseModel):
+    decision: str = Field(..., pattern="^(approve|reject)$")
+    approver: Optional[str] = None
+    comments: Optional[str] = None
 
 
 # -----------------------------
@@ -454,12 +538,45 @@ def get_current_tax(code: str = Query(..., description="Tax code, e.g., VAT"), o
 
 
 # -----------------------------
+# Approval Config (Admin)
+# -----------------------------
+@app.post("/approvals/pr-flow", tags=["approvals"])
+def set_pr_approval_flow(data: ApprovalFlowIn, db: Session = Depends(get_db)):
+    if data.doc_type != "PR":
+        raise HTTPException(status_code=400, detail="Only PR doc_type supported")
+    row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PR").first()
+    import json
+    flow_json = json.dumps(data.stages)
+    if row:
+        row.flow_json = flow_json
+    else:
+        row = ApprovalConfig(doc_type="PR", flow_json=flow_json)
+        db.add(row)
+    db.commit()
+    return {"message": "Approval flow set", "stages": data.stages}
+
+
+@app.get("/approvals/pr-flow", tags=["approvals"])
+def get_pr_approval_flow(db: Session = Depends(get_db)):
+    row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PR").first()
+    import json
+    stages = json.loads(row.flow_json) if row else []
+    return {"stages": stages}
+
+
+# -----------------------------
 # Purchase Requisition
 # -----------------------------
 @app.post("/purchase-requisitions", tags=["purchase_requisition"])
 def create_pr(data: PRCreate, db: Session = Depends(get_db)):
+    # Mandatory composite business keys
+    if not data.customer_name or not data.customer_ref_no:
+        raise HTTPException(status_code=400, detail="customer_name and customer_ref_no are required")
+
     if db.query(PurchaseRequisition).filter(PurchaseRequisition.pr_number == data.pr_number).first():
         raise HTTPException(status_code=400, detail="PR number already exists")
+
+    # Create PR header
     pr = PurchaseRequisition(
         pr_number=data.pr_number,
         requested_by=data.requested_by,
@@ -471,18 +588,80 @@ def create_pr(data: PRCreate, db: Session = Depends(get_db)):
     db.add(pr)
     db.flush()
 
+    # Fetch approval flow (admin configured)
+    cfg = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PR").first()
+    import json
+    stages = []
+    if cfg:
+        try:
+            stages = json.loads(cfg.flow_json)
+        except Exception:
+            stages = []
+
+    # Determine tax snapshot
+    tax_percent = 0.0
+    if data.tax_code:
+        # find current tax automatically
+        today = date.today()
+        row = (
+            db.query(TaxRate)
+            .filter(TaxRate.code == data.tax_code, TaxRate.is_active == 1, TaxRate.effective_date <= today)
+            .order_by(TaxRate.effective_date.desc(), TaxRate.id.desc())
+            .first()
+        )
+        if row:
+            tax_percent = float(row.rate_percent)
+
+    # Create Extra header info with unique business key constraint
+    extra = PRExtra(
+        pr_id=pr.id,
+        customer_name=data.customer_name,
+        customer_ref_no=data.customer_ref_no,
+        supplier_name=data.supplier_name,
+        supplier_address=data.supplier_address,
+        tax_code=data.tax_code,
+        tax_percent=tax_percent,
+        approval_status="PENDING" if stages else "PENDING",
+        approval_level=0,
+        approval_flow=json.dumps(stages) if stages else json.dumps([]),
+    )
+    # Enforce uniqueness of customer_name + customer_ref_no
+    existing_extra = db.query(PRExtra).filter(
+        PRExtra.customer_name == extra.customer_name,
+        PRExtra.customer_ref_no == extra.customer_ref_no,
+    ).first()
+    if existing_extra:
+        raise HTTPException(status_code=400, detail="Combination of customer_name and customer_ref_no already exists")
+
+    db.add(extra)
+
+    # Items
     for it in data.items:
         # Validate item exists
         if not db.get(Item, it.item_id):
             raise HTTPException(status_code=404, detail=f"Item {it.item_id} not found")
+        # Backward compatible storage
+        qty_kgs = float(it.qty_kgs or 0)
+        qty_bags = float(it.qty_bags or 0)
+        unit_price = float(it.unit_price or 0)
+        # Keep legacy columns populated (qty & target_price)
+        legacy_qty = qty_kgs if qty_kgs > 0 else (qty_bags if qty_bags > 0 else 0)
         pr_item = PurchaseRequisitionItem(
             pr_id=pr.id,
             item_id=it.item_id,
-            qty=it.qty,
-            target_price=it.target_price,
+            qty=legacy_qty,
+            target_price=unit_price,
             notes=it.notes,
         )
         db.add(pr_item)
+        db.flush()
+        pr_item_extra = PRItemExtra(
+            pr_item_id=pr_item.id,
+            qty_bags=qty_bags,
+            qty_kgs=qty_kgs,
+            unit_price=unit_price,
+        )
+        db.add(pr_item_extra)
 
     db.commit()
     db.refresh(pr)
@@ -494,15 +673,18 @@ def list_pr(db: Session = Depends(get_db)):
     prs = db.query(PurchaseRequisition).order_by(PurchaseRequisition.id.desc()).all()
     result = []
     for pr in prs:
-        items = [
-            {
-                "item_id": i.item_id,
-                "qty": i.qty,
-                "target_price": i.target_price,
-                "notes": i.notes,
-            }
-            for i in pr.items
-        ]
+        items = []
+        for i in pr.items:
+            items.append(
+                {
+                    "item_id": i.item_id,
+                    "qty_bags": i.extra.qty_bags if i.extra else None,
+                    "qty_kgs": i.extra.qty_kgs if i.extra else i.qty,
+                    "unit_price": i.extra.unit_price if i.extra else i.target_price,
+                    "notes": i.notes,
+                }
+            )
+        extra = pr.extra
         result.append(
             {
                 "id": pr.id,
@@ -512,10 +694,55 @@ def list_pr(db: Session = Depends(get_db)):
                 "requested_date": pr.requested_date,
                 "status": pr.status,
                 "notes": pr.notes,
+                "customer_name": extra.customer_name if extra else None,
+                "customer_ref_no": extra.customer_ref_no if extra else None,
+                "supplier_name": extra.supplier_name if extra else None,
+                "supplier_address": extra.supplier_address if extra else None,
+                "tax_code": extra.tax_code if extra else None,
+                "tax_percent": extra.tax_percent if extra else None,
+                "approval_status": extra.approval_status if extra else None,
+                "approval_level": extra.approval_level if extra else None,
                 "items": items,
             }
         )
     return result
+
+
+@app.post("/purchase-requisitions/{pr_id}/approve", tags=["purchase_requisition"])
+def approve_pr(pr_id: int, action: ApproveAction, db: Session = Depends(get_db)):
+    pr = db.get(PurchaseRequisition, pr_id)
+    if not pr or not pr.extra:
+        raise HTTPException(status_code=404, detail="PR not found")
+    import json
+    extra = pr.extra
+    stages = []
+    try:
+        stages = json.loads(extra.approval_flow) if extra.approval_flow else []
+    except Exception:
+        stages = []
+
+    if action.decision == "reject":
+        extra.approval_status = "REJECTED"
+        pr.status = "CANCELLED"
+        db.commit()
+        return {"status": extra.approval_status}
+
+    # Approve path
+    current_level = extra.approval_level or 0
+    if current_level >= len(stages):
+        # Already at end
+        extra.approval_status = "APPROVED"
+        pr.status = "APPROVED"
+    else:
+        current_level += 1
+        extra.approval_level = current_level
+        if current_level >= len(stages):
+            extra.approval_status = "APPROVED"
+            pr.status = "APPROVED"
+        else:
+            extra.approval_status = "PENDING"
+    db.commit()
+    return {"status": extra.approval_status, "level": extra.approval_level}
 
 
 # -----------------------------
@@ -771,7 +998,7 @@ def report_pr_vs_po(pr_id: int = Query(..., description="Purchase Requisition ID
         raise HTTPException(status_code=404, detail="PR not found")
 
     # Sum ordered quantities from all POs linked to this PR
-    item_map = {}
+    item_map: Dict[int, Dict[str, float]] = {}
     for it in pr.items:
         item_map[it.item_id] = {"requested": it.qty, "ordered": 0.0}
 
@@ -795,7 +1022,15 @@ def report_pr_vs_po(pr_id: int = Query(..., description="Purchase Requisition ID
                 "variance": (vals["ordered"] - vals["requested"]),
             }
         )
-    return {"pr_id": pr.id, "pr_number": pr.pr_number, "rows": rows}
+    # Carry forward business keys
+    extra = pr.extra
+    return {
+        "pr_id": pr.id,
+        "pr_number": pr.pr_number,
+        "customer_name": extra.customer_name if extra else None,
+        "customer_ref_no": extra.customer_ref_no if extra else None,
+        "rows": rows,
+    }
 
 
 @app.get("/reports/po-vs-grn", tags=["reports"])
@@ -804,7 +1039,7 @@ def report_po_vs_grn(po_id: int = Query(..., description="Purchase Order ID"), d
     if not po:
         raise HTTPException(status_code=404, detail="PO not found")
 
-    item_map = {}
+    item_map: Dict[int, Dict[str, float]] = {}
     for it in po.items:
         item_map[it.item_id] = {"ordered": it.qty_ordered, "received": 0.0}
 
