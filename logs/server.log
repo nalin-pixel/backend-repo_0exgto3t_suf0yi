@@ -1,7 +1,47 @@
 INFO:     Will watch for changes in these directories: ['/home/workspace']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [468] using StatReload
-INFO:     Started server process [470]
+INFO:     Started reloader process [541] using StatReload
+INFO:     Started server process [543]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     172.20.0.1:33300 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     172.20.0.1:44652 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     172.20.0.1:44664 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44674 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44664 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:44674 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46648 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46652 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46648 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46652 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46648 - "OPTIONS /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46652 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46658 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46658 - "OPTIONS /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46648 - "OPTIONS /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46652 - "OPTIONS /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33614 - "GET /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46658 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33620 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46648 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46652 - "GET /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:46658 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36470 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36470 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36470 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36470 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36474 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:33624 - "GET /purchase-orders HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36470 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36474 - "GET /purchase-requisitions HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:36454 - "GET /items HTTP/1.1" 200 OK

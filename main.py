@@ -150,6 +150,20 @@ class PurchaseOrder(Base):
     pr = relationship("PurchaseRequisition")
     items = relationship("PurchaseOrderItem", back_populates="po", cascade="all, delete-orphan")
     grns = relationship("GRN", back_populates="po")
+    extra = relationship("POExtra", back_populates="po", uselist=False, cascade="all, delete-orphan")
+
+
+class POExtra(Base):
+    __tablename__ = "po_extra"
+    id = Column(Integer, primary_key=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), unique=True, nullable=False)
+    tax_code = Column(String(32))
+    tax_percent = Column(Float, default=0)
+    approval_status = Column(String(32), default="PENDING")
+    approval_level = Column(Integer, default=0)
+    approval_flow = Column(Text)
+
+    po = relationship("PurchaseOrder", back_populates="extra")
 
 
 class PurchaseOrderItem(Base):
@@ -241,7 +255,7 @@ class TaxRate(Base):
 class ApprovalConfig(Base):
     __tablename__ = "approval_config"
     id = Column(Integer, primary_key=True)
-    doc_type = Column(String(32), nullable=False)  # e.g., PR
+    doc_type = Column(String(32), nullable=False)  # e.g., PR, PO
     flow_json = Column(Text, nullable=False)  # JSON string of stages
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -344,11 +358,12 @@ class POItemIn(BaseModel):
 
 class POCreate(BaseModel):
     po_number: str
-    supplier_id: int
+    supplier_id: Optional[int] = None
     pr_id: Optional[int] = None
     order_date: Optional[date] = None
     status: str = "OPEN"
     notes: Optional[str] = None
+    tax_code: Optional[str] = None
     items: List[POItemIn]
 
 
@@ -543,7 +558,7 @@ def get_current_tax(code: str = Query(..., description="Tax code, e.g., VAT"), o
 @app.post("/approvals/pr-flow", tags=["approvals"])
 def set_pr_approval_flow(data: ApprovalFlowIn, db: Session = Depends(get_db)):
     if data.doc_type != "PR":
-        raise HTTPException(status_code=400, detail="Only PR doc_type supported")
+        raise HTTPException(status_code=400, detail="Only PR doc_type supported here")
     row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PR").first()
     import json
     flow_json = json.dumps(data.stages)
@@ -559,6 +574,30 @@ def set_pr_approval_flow(data: ApprovalFlowIn, db: Session = Depends(get_db)):
 @app.get("/approvals/pr-flow", tags=["approvals"])
 def get_pr_approval_flow(db: Session = Depends(get_db)):
     row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PR").first()
+    import json
+    stages = json.loads(row.flow_json) if row else []
+    return {"stages": stages}
+
+
+@app.post("/approvals/po-flow", tags=["approvals"])
+def set_po_approval_flow(data: ApprovalFlowIn, db: Session = Depends(get_db)):
+    if data.doc_type != "PO":
+        raise HTTPException(status_code=400, detail="Use doc_type=PO for PO flow")
+    row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PO").first()
+    import json
+    flow_json = json.dumps(data.stages)
+    if row:
+        row.flow_json = flow_json
+    else:
+        row = ApprovalConfig(doc_type="PO", flow_json=flow_json)
+        db.add(row)
+    db.commit()
+    return {"message": "Approval flow set", "stages": data.stages}
+
+
+@app.get("/approvals/po-flow", tags=["approvals"])
+def get_po_approval_flow(db: Session = Depends(get_db)):
+    row = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PO").first()
     import json
     stages = json.loads(row.flow_json) if row else []
     return {"stages": stages}
@@ -621,7 +660,7 @@ def create_pr(data: PRCreate, db: Session = Depends(get_db)):
         supplier_address=data.supplier_address,
         tax_code=data.tax_code,
         tax_percent=tax_percent,
-        approval_status="PENDING" if stages else "PENDING",
+        approval_status="PENDING",
         approval_level=0,
         approval_flow=json.dumps(stages) if stages else json.dumps([]),
     )
@@ -752,14 +791,30 @@ def approve_pr(pr_id: int, action: ApproveAction, db: Session = Depends(get_db))
 def create_po(data: POCreate, db: Session = Depends(get_db)):
     if db.query(PurchaseOrder).filter(PurchaseOrder.po_number == data.po_number).first():
         raise HTTPException(status_code=400, detail="PO number already exists")
-    if not db.get(Supplier, data.supplier_id):
-        raise HTTPException(status_code=404, detail="Supplier not found")
-    if data.pr_id and not db.get(PurchaseRequisition, data.pr_id):
-        raise HTTPException(status_code=404, detail="Linked PR not found")
+
+    linked_pr = None
+    if data.pr_id:
+        linked_pr = db.get(PurchaseRequisition, data.pr_id)
+        if not linked_pr:
+            raise HTTPException(status_code=404, detail="Linked PR not found")
+
+    supplier_id = data.supplier_id
+    # If supplier not provided but PR given, derive from PR supplier_name (create master if needed)
+    if not supplier_id and linked_pr and linked_pr.extra and linked_pr.extra.supplier_name:
+        sup_name = linked_pr.extra.supplier_name
+        supplier = db.query(Supplier).filter(Supplier.name == sup_name).first()
+        if not supplier:
+            supplier = Supplier(name=sup_name, address=linked_pr.extra.supplier_address or None)
+            db.add(supplier)
+            db.flush()
+        supplier_id = supplier.id
+
+    if not supplier_id:
+        raise HTTPException(status_code=400, detail="supplier_id is required (or provide pr_id with supplier on PR)")
 
     po = PurchaseOrder(
         po_number=data.po_number,
-        supplier_id=data.supplier_id,
+        supplier_id=supplier_id,
         pr_id=data.pr_id,
         order_date=data.order_date or date.today(),
         status=data.status,
@@ -768,16 +823,61 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     db.add(po)
     db.flush()
 
-    for it in data.items:
-        if not db.get(Item, it.item_id):
-            raise HTTPException(status_code=404, detail=f"Item {it.item_id} not found")
-        po_item = PurchaseOrderItem(
-            po_id=po.id,
-            item_id=it.item_id,
-            qty_ordered=it.qty_ordered,
-            unit_price=it.unit_price,
+    # Snapshot approval flow for PO
+    cfg = db.query(ApprovalConfig).filter(ApprovalConfig.doc_type == "PO").first()
+    import json
+    stages = []
+    if cfg:
+        try:
+            stages = json.loads(cfg.flow_json)
+        except Exception:
+            stages = []
+
+    # Snapshot tax for PO (prefer payload, else PR's tax)
+    tax_code = data.tax_code or (linked_pr.extra.tax_code if linked_pr and linked_pr.extra else None)
+    tax_percent = 0.0
+    if tax_code:
+        today = date.today()
+        row = (
+            db.query(TaxRate)
+            .filter(TaxRate.code == tax_code, TaxRate.is_active == 1, TaxRate.effective_date <= today)
+            .order_by(TaxRate.effective_date.desc(), TaxRate.id.desc())
+            .first()
         )
-        db.add(po_item)
+        if row:
+            tax_percent = float(row.rate_percent)
+
+    po_extra = POExtra(
+        po_id=po.id,
+        tax_code=tax_code,
+        tax_percent=tax_percent,
+        approval_status="PENDING",
+        approval_level=0,
+        approval_flow=json.dumps(stages) if stages else json.dumps([]),
+    )
+    db.add(po_extra)
+
+    # Items: if items provided use them; else if PR linked, prefill from PR
+    po_items_source = data.items
+    if (not po_items_source or len(po_items_source) == 0) and linked_pr:
+        # derive from PR: use qty_kgs if available else qty_bags else legacy qty; unit price from PR extra.unit_price
+        for pri in linked_pr.items:
+            unit_price = pri.extra.unit_price if pri.extra else (pri.target_price or 0)
+            qty = pri.extra.qty_kgs if (pri.extra and pri.extra.qty_kgs and pri.extra.qty_kgs > 0) else (
+                pri.extra.qty_bags if (pri.extra and pri.extra.qty_bags and pri.extra.qty_bags > 0) else pri.qty
+            )
+            db.add(PurchaseOrderItem(po_id=po.id, item_id=pri.item_id, qty_ordered=float(qty or 0), unit_price=float(unit_price or 0)))
+    else:
+        for it in po_items_source:
+            if not db.get(Item, it.item_id):
+                raise HTTPException(status_code=404, detail=f"Item {it.item_id} not found")
+            po_item = PurchaseOrderItem(
+                po_id=po.id,
+                item_id=it.item_id,
+                qty_ordered=it.qty_ordered,
+                unit_price=it.unit_price,
+            )
+            db.add(po_item)
 
     db.commit()
     db.refresh(po)
@@ -797,6 +897,7 @@ def list_po(db: Session = Depends(get_db)):
             }
             for i in po.items
         ]
+        extra = po.extra
         result.append(
             {
                 "id": po.id,
@@ -807,6 +908,10 @@ def list_po(db: Session = Depends(get_db)):
                 "status": po.status,
                 "notes": po.notes,
                 "items": items,
+                "approval_status": extra.approval_status if extra else None,
+                "approval_level": extra.approval_level if extra else None,
+                "tax_code": extra.tax_code if extra else None,
+                "tax_percent": extra.tax_percent if extra else None,
             }
         )
     return result
@@ -823,19 +928,20 @@ def po_totals(po_id: int, tax_code: Optional[str] = None, db: Session = Depends(
         subtotal += (it.qty_ordered * it.unit_price)
     tax_percent = 0.0
     tax_info = None
-    if tax_code:
+    # Prefer provided tax_code; else snapshot stored on PO
+    use_code = tax_code or (po.extra.tax_code if po.extra else None)
+    if use_code:
         # get current tax by code
         today = date.today()
         row = (
             db.query(TaxRate)
-            .filter(TaxRate.code == tax_code, TaxRate.is_active == 1, TaxRate.effective_date <= today)
+            .filter(TaxRate.code == use_code, TaxRate.is_active == 1, TaxRate.effective_date <= today)
             .order_by(TaxRate.effective_date.desc(), TaxRate.id.desc())
             .first()
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="No active tax rate found for the provided code")
-        tax_percent = float(row.rate_percent)
-        tax_info = {"code": row.code, "name": row.name, "effective_date": row.effective_date, "rate_percent": row.rate_percent}
+        if row:
+            tax_percent = float(row.rate_percent)
+            tax_info = {"code": row.code, "name": row.name, "effective_date": row.effective_date, "rate_percent": row.rate_percent}
     tax_amount = subtotal * (tax_percent / 100.0)
     grand_total = subtotal + tax_amount
     return {
@@ -847,6 +953,41 @@ def po_totals(po_id: int, tax_code: Optional[str] = None, db: Session = Depends(
         "grand_total": round(grand_total, 2),
         "tax": tax_info,
     }
+
+
+@app.post("/purchase-orders/{po_id}/approve", tags=["purchase_order"])
+def approve_po(po_id: int, action: ApproveAction, db: Session = Depends(get_db)):
+    po = db.get(PurchaseOrder, po_id)
+    if not po or not po.extra:
+        raise HTTPException(status_code=404, detail="PO not found")
+    import json
+    extra = po.extra
+    stages = []
+    try:
+        stages = json.loads(extra.approval_flow) if extra.approval_flow else []
+    except Exception:
+        stages = []
+
+    if action.decision == "reject":
+        extra.approval_status = "REJECTED"
+        po.status = "CANCELLED"
+        db.commit()
+        return {"status": extra.approval_status}
+
+    current_level = extra.approval_level or 0
+    if current_level >= len(stages):
+        extra.approval_status = "APPROVED"
+        po.status = "APPROVED"
+    else:
+        current_level += 1
+        extra.approval_level = current_level
+        if current_level >= len(stages):
+            extra.approval_status = "APPROVED"
+            po.status = "APPROVED"
+        else:
+            extra.approval_status = "PENDING"
+    db.commit()
+    return {"status": extra.approval_status, "level": extra.approval_level}
 
 
 # -----------------------------
