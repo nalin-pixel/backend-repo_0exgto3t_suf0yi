@@ -190,6 +190,17 @@ class StockTransaction(Base):
     item = relationship("Item", back_populates="stock_txns")
 
 
+class TaxRate(Base):
+    __tablename__ = "tax_rates"
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(32), index=True, nullable=False)  # e.g., VAT, GST
+    name = Column(String(128), nullable=False)
+    rate_percent = Column(Float, nullable=False)  # 5.0 means 5%
+    effective_date = Column(Date, nullable=False, index=True)
+    is_active = Column(Integer, default=1)  # 1=true, 0=false
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # -----------------------------
 # Pydantic Schemas
 # -----------------------------
@@ -311,6 +322,20 @@ class StockTxnOut(BaseModel):
         from_attributes = True
 
 
+class TaxRateIn(BaseModel):
+    code: str = Field(..., description="Tax code, e.g., VAT, GST")
+    name: str
+    rate_percent: float = Field(..., ge=0)
+    effective_date: date
+    is_active: int = 1
+
+
+class TaxRateOut(TaxRateIn):
+    id: int
+    class Config:
+        from_attributes = True
+
+
 # -----------------------------
 # FastAPI app
 # -----------------------------
@@ -384,6 +409,48 @@ def create_item(data: ItemIn, db: Session = Depends(get_db)):
 @app.get("/items", response_model=List[ItemOut], tags=["masters"])
 def list_items(db: Session = Depends(get_db)):
     return db.query(Item).order_by(Item.name).all()
+
+
+# -----------------------------
+# Taxes (Occasionally adjusted via effective dates)
+# -----------------------------
+@app.post("/taxes", response_model=TaxRateOut, tags=["taxes"])
+def create_tax_rate(data: TaxRateIn, db: Session = Depends(get_db)):
+    obj = TaxRate(**data.dict())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@app.get("/taxes", response_model=List[TaxRateOut], tags=["taxes"])
+def list_tax_rates(code: Optional[str] = None, active_only: bool = False, db: Session = Depends(get_db)):
+    q = db.query(TaxRate)
+    if code:
+        q = q.filter(TaxRate.code == code)
+    if active_only:
+        q = q.filter(TaxRate.is_active == 1)
+    return q.order_by(TaxRate.code.asc(), TaxRate.effective_date.desc()).all()
+
+
+@app.get("/taxes/current", tags=["taxes"])
+def get_current_tax(code: str = Query(..., description="Tax code, e.g., VAT"), on_date: Optional[date] = None, db: Session = Depends(get_db)):
+    d = on_date or date.today()
+    row = (
+        db.query(TaxRate)
+        .filter(TaxRate.code == code, TaxRate.is_active == 1, TaxRate.effective_date <= d)
+        .order_by(TaxRate.effective_date.desc(), TaxRate.id.desc())
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No active tax rate found for the given code and date")
+    return {
+        "id": row.id,
+        "code": row.code,
+        "name": row.name,
+        "rate_percent": row.rate_percent,
+        "effective_date": row.effective_date,
+    }
 
 
 # -----------------------------
@@ -516,6 +583,43 @@ def list_po(db: Session = Depends(get_db)):
             }
         )
     return result
+
+
+@app.get("/purchase-orders/{po_id}/totals", tags=["purchase_order"])
+def po_totals(po_id: int, tax_code: Optional[str] = None, db: Session = Depends(get_db)):
+    po = db.get(PurchaseOrder, po_id)
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    # Subtotal from items
+    subtotal = 0.0
+    for it in po.items:
+        subtotal += (it.qty_ordered * it.unit_price)
+    tax_percent = 0.0
+    tax_info = None
+    if tax_code:
+        # get current tax by code
+        today = date.today()
+        row = (
+            db.query(TaxRate)
+            .filter(TaxRate.code == tax_code, TaxRate.is_active == 1, TaxRate.effective_date <= today)
+            .order_by(TaxRate.effective_date.desc(), TaxRate.id.desc())
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="No active tax rate found for the provided code")
+        tax_percent = float(row.rate_percent)
+        tax_info = {"code": row.code, "name": row.name, "effective_date": row.effective_date, "rate_percent": row.rate_percent}
+    tax_amount = subtotal * (tax_percent / 100.0)
+    grand_total = subtotal + tax_amount
+    return {
+        "po_id": po.id,
+        "po_number": po.po_number,
+        "subtotal": round(subtotal, 2),
+        "tax_percent": tax_percent,
+        "tax_amount": round(tax_amount, 2),
+        "grand_total": round(grand_total, 2),
+        "tax": tax_info,
+    }
 
 
 # -----------------------------
