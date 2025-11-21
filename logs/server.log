@@ -1,21 +1,15 @@
 INFO:     Will watch for changes in these directories: ['/home/workspace']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [808] using StatReload
-INFO:     Started server process [810]
+INFO:     Started reloader process [851] using StatReload
+INFO:     Started server process [853]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     172.20.0.1:36854 - "HEAD / HTTP/1.1" 405 Method Not Allowed
-INFO:     172.20.0.1:36860 - "OPTIONS /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36868 - "OPTIONS /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36880 - "OPTIONS /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36886 - "OPTIONS /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36898 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36868 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36880 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36886 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36860 - "GET /suppliers HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36886 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36860 - "GET /material-requests HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36886 - "GET /items HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36860 - "GET /material-requests HTTP/1.1" 200 OK
-INFO:     172.20.0.1:36886 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37278 - "HEAD / HTTP/1.1" 405 Method Not Allowed
+INFO:     172.20.0.1:37292 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37294 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37292 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37294 - "GET /suppliers HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37292 - "GET /items HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37294 - "GET /material-requests HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37292 - "GET /material-requests HTTP/1.1" 200 OK
+INFO:     172.20.0.1:37294 - "GET /items HTTP/1.1" 200 OK
